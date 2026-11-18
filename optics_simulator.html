@@ -1,0 +1,494 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IGCSE Optics Simulator</title>
+
+<style>
+  body {
+    margin: 0;
+    padding: 20px;
+    font-family: Arial, sans-serif;
+    background: #101827;
+    color: #edf4ff;
+  }
+
+  h1 { font-size: 25px; }
+  p { color: #bac9dd; }
+
+  .controls, .panel {
+    background: #1a2638;
+    padding: 16px;
+    border-radius: 12px;
+    margin-bottom: 16px;
+  }
+
+  label {
+    display: block;
+    margin: 12px 0 6px;
+    font-weight: bold;
+  }
+
+  select {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    background: #26374e;
+    color: white;
+    border: 1px solid #506681;
+    font-size: 15px;
+  }
+
+  .diagram {
+    background: #f7f9fc;
+    border-radius: 12px;
+    overflow: hidden;
+    color: #172337;
+  }
+
+  svg { width: 100%; height: auto; display: block; }
+
+  .properties {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .property {
+    padding: 12px;
+    background: #26374e;
+    border-radius: 8px;
+  }
+
+  .property span {
+    display: block;
+    color: #a9bdd7;
+    font-size: 13px;
+    margin-bottom: 5px;
+  }
+
+  .property strong { font-size: 15px; }
+
+  .note {
+    background: #26374e;
+    padding: 12px;
+    border-left: 4px solid #65b5ff;
+    border-radius: 6px;
+    line-height: 1.5;
+  }
+
+  .legend { font-size: 14px; line-height: 1.9; }
+
+  @media (min-width: 800px) {
+    .layout {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+  }
+</style>
+</head>
+
+<body>
+
+<h1>🔬 IGCSE Optics Simulator</h1>
+<p>Choose a device and move the object. Watch where the image forms.</p>
+
+<div class="controls">
+  <label for="device">1. Choose the device</label>
+  <select id="device">
+    <option value="convexLens">Convex lens (converging)</option>
+    <option value="concaveLens">Concave lens (diverging)</option>
+    <option value="concaveMirror">Concave mirror (converging)</option>
+    <option value="convexMirror">Convex mirror (diverging)</option>
+  </select>
+
+  <label for="position">2. Choose the object's position</label>
+  <select id="position"></select>
+</div>
+
+<div class="layout">
+  <div>
+    <div class="diagram">
+      <svg id="scene" viewBox="0 0 700 440"
+           role="img" aria-label="Ray diagram showing the object and image">
+      </svg>
+    </div>
+
+    <div class="panel">
+      <h3>Image properties</h3>
+      <div class="properties">
+        <div class="property">
+          <span>Image position</span>
+          <strong id="imagePosition">—</strong>
+        </div>
+        <div class="property">
+          <span>Image type</span>
+          <strong id="imageType">—</strong>
+        </div>
+        <div class="property">
+          <span>Orientation</span>
+          <strong id="orientation">—</strong>
+        </div>
+        <div class="property">
+          <span>Size</span>
+          <strong id="size">—</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h3>How to read the diagram</h3>
+      <div class="legend">
+        🟢 Green arrow = object<br>
+        🟣 Purple arrow = image<br>
+        🔴 Red line = ray initially parallel to the principal axis<br>
+        🔵 Blue line = another principal ray<br>
+        - - - Dashed line = backward extension of rays
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Important labels</h3>
+      <p><b>F:</b> Principal focus.</p>
+      <p><b>2F:</b> Twice the focal length from a lens.</p>
+      <p><b>C:</b> Centre of curvature of a spherical mirror (at 2F).</p>
+      <p><b>P:</b> Pole, the middle of a mirror.</p>
+      <div class="note">
+        <b>What does “behind the mirror” mean?</b><br>
+        The object is in front of the mirror. Behind means the other side of the mirror, where the image appears to be. Light does not actually meet there for a virtual image.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const deviceSelect = document.getElementById("device");
+const positionSelect = document.getElementById("position");
+const svg = document.getElementById("scene");
+
+const positions = {
+  convexLens: [
+    ["beyond2F", "Beyond 2F"],
+    ["at2F", "At 2F"],
+    ["betweenF2F", "Between F and 2F"],
+    ["atF", "At F"],
+    ["insideF", "Between F and the lens"]
+  ],
+  concaveLens: [
+    ["any", "Any ordinary object position"]
+  ],
+  concaveMirror: [
+    ["beyondC", "Beyond C"],
+    ["atC", "At C"],
+    ["betweenCF", "Between C and F"],
+    ["atF", "At F"],
+    ["insideF", "Between F and P"]
+  ],
+  convexMirror: [
+    ["any", "Any ordinary object position"]
+  ]
+};
+
+// Diagram coordinates
+const axisY = 240;
+const deviceX = 350;
+const scale = 65;
+
+function makeConfig(device, pos) {
+  // x is measured relative to the lens or mirror.
+  // Negative = in front/left; positive = right.
+  let c = {
+    objectX: -195,
+    imageX: 110,
+    objectH: 65,
+    imageH: -35,
+    type: "Real",
+    orientation: "Inverted",
+    size: "Smaller",
+    imagePosition: "Opposite side",
+    virtual: false,
+    note: ""
+  };
+
+  if (device === "convexLens") {
+    const table = {
+      beyond2F: {
+        objectX: -195, imageX: 130, imageH: -43,
+        size: "Smaller",
+        imagePosition: "Between F and 2F, opposite side"
+      },
+      at2F: {
+        objectX: -130, imageX: 130, imageH: -65,
+        size: "Same size",
+        imagePosition: "At 2F, opposite side"
+      },
+      betweenF2F: {
+        objectX: -95, imageX: 225, imageH: -150,
+        size: "Bigger",
+        imagePosition: "Beyond 2F, opposite side"
+      },
+      atF: {
+        objectX: -65, imageX: 290, imageH: -65,
+        size: "No finite image",
+        imagePosition: "At infinity",
+        note: "The refracted rays are parallel, so they do not meet at a finite distance."
+      },
+      insideF: {
+        objectX: -35, imageX: -105, imageH: 125,
+        type: "Virtual",
+        orientation: "Upright",
+        size: "Bigger",
+        virtual: true,
+        imagePosition: "Same side as object"
+      }
+    };
+
+    c = {...c, ...table[pos]};
+    c.objectX = table[pos].objectX;
+  }
+
+  if (device === "concaveLens") {
+    c = {
+      ...c,
+      objectX: -195,
+      imageX: -43,
+      imageH: 22,
+      type: "Virtual",
+      orientation: "Upright",
+      size: "Smaller",
+      imagePosition: "Between F and lens, same side",
+      virtual: true
+    };
+  }
+
+  if (device === "concaveMirror") {
+    const table = {
+      beyondC: {
+        objectX: -260, imageX: -98, imageH: -33,
+        size: "Smaller",
+        imagePosition: "Between F and C"
+      },
+      atC: {
+        objectX: -130, imageX: -130, imageH: -65,
+        size: "Same size",
+        imagePosition: "At C"
+      },
+      betweenCF: {
+        objectX: -95, imageX: -225, imageH: -150,
+        size: "Bigger",
+        imagePosition: "Beyond C"
+      },
+      atF: {
+        objectX: -65, imageX: -290, imageH: -65,
+        size: "No finite image",
+        imagePosition: "At infinity",
+        note: "The reflected rays are parallel, so there is no finite image."
+      },
+      insideF: {
+        objectX: -35, imageX: 105, imageH: 125,
+        type: "Virtual",
+        orientation: "Upright",
+        size: "Bigger",
+        imagePosition: "Behind the mirror",
+        virtual: true
+      }
+    };
+
+    c = {...c, ...table[pos]};
+  }
+
+  if (device === "convexMirror") {
+    c = {
+      ...c,
+      objectX: -195,
+      imageX: 43,
+      imageH: 22,
+      type: "Virtual",
+      orientation: "Upright",
+      size: "Smaller",
+      imagePosition: "Behind mirror, between P and F",
+      virtual: true
+    };
+  }
+
+  return c;
+}
+
+function line(x1, y1, x2, y2, color, dashed=false) {
+  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+    stroke="${color}" stroke-width="2.5"
+    ${dashed ? 'stroke-dasharray="7 6"' : ''} />`;
+}
+
+function text(x, y, content, color="#172337", size=14, anchor="middle") {
+  return `<text x="${x}" y="${y}" fill="${color}" font-size="${size}"
+    font-weight="600" text-anchor="${anchor}">${content}</text>`;
+}
+
+function arrow(x, h, color, label) {
+  const tipY = axisY - h;
+  const baseY = axisY;
+  const head = h >= 0 ? 10 : -10;
+  return `
+    <line x1="${x}" y1="${baseY}" x2="${x}" y2="${tipY}"
+      stroke="${color}" stroke-width="5" />
+    <polygon points="${x-8},${tipY+head} ${x+8},${tipY+head} ${x},${tipY}"
+      fill="${color}" />
+    ${text(x, h >= 0 ? tipY-12 : tipY+25, label, color, 15)}
+  `;
+}
+
+function draw() {
+  const device = deviceSelect.value;
+  const pos = positionSelect.value;
+  const c = makeConfig(device, pos);
+
+  const isMirror = device.includes("Mirror");
+  const xDevice = deviceX;
+  const xObj = xDevice + c.objectX;
+  const xImg = xDevice + c.imageX;
+
+  const fLeft = xDevice - scale;
+  const fRight = xDevice + scale;
+  const twoLeft = xDevice - 2*scale;
+  const twoRight = xDevice + 2*scale;
+
+  let out = `
+    <rect width="700" height="440" fill="#f7f9fc"/>
+    ${line(25, axisY, 675, axisY, "#526276")}
+    ${text(670, axisY-10, "Principal axis", "#526276", 12, "end")}
+  `;
+
+  // Focal points and 2F/C labels
+  const labels = isMirror
+    ? [
+        [fLeft, "F"],
+        [twoLeft, device === "concaveMirror" ? "C" : ""],
+        [xDevice, "P"],
+        [fRight, "F"]
+      ]
+    : [
+        [fLeft, "F"], [twoLeft, "2F"],
+        [xDevice, "O"], [fRight, "F"], [twoRight, "2F"]
+      ];
+
+  for (const [x, label] of labels) {
+    if (!label) continue;
+    out += line(x, axisY-8, x, axisY+8, "#526276");
+    out += text(x, axisY+28, label, "#34465d", 14);
+  }
+
+  // Draw the optical device
+  if (device === "convexLens") {
+    out += `<path d="M ${xDevice} 125 Q ${xDevice-30} 240 ${xDevice} 355
+      Q ${xDevice+30} 240 ${xDevice} 125 Z"
+      fill="#69c6ed" fill-opacity=".65" stroke="#1684bd" stroke-width="2"/>`;
+  } else if (device === "concaveLens") {
+    out += `<path d="M ${xDevice-15} 125 Q ${xDevice+18} 240 ${xDevice-15} 355
+      L ${xDevice+15} 355 Q ${xDevice-18} 240 ${xDevice+15} 125 Z"
+      fill="#69c6ed" fill-opacity=".65" stroke="#1684bd" stroke-width="2"/>`;
+  } else if (device === "concaveMirror") {
+    out += `<path d="M ${xDevice} 125 Q ${xDevice+50} 240 ${xDevice} 355"
+      fill="none" stroke="#1684bd" stroke-width="10"/>`;
+    out += `<path d="M ${xDevice+6} 125 Q ${xDevice+56} 240 ${xDevice+6} 355"
+      fill="none" stroke="#9aa9ba" stroke-width="3"/>`;
+  } else {
+    out += `<path d="M ${xDevice} 125 Q ${xDevice-50} 240 ${xDevice} 355"
+      fill="none" stroke="#1684bd" stroke-width="10"/>`;
+    out += `<path d="M ${xDevice-6} 125 Q ${xDevice-56} 240 ${xDevice-6} 355"
+      fill="none" stroke="#9aa9ba" stroke-width="3"/>`;
+  }
+
+  // Object and image arrows
+  out += arrow(xObj, c.objectH, "#25a55b", "Object");
+
+  if (c.size !== "No finite image") {
+    out += arrow(xImg, c.imageH, "#9349dc", "Image");
+  }
+
+  // Illustrative rays. These are schematic, not precision ray tracing.
+  const objTipY = axisY - c.objectH;
+  const imgTipY = axisY - c.imageH;
+
+  if (!isMirror && device === "convexLens" && !c.virtual && pos !== "atF") {
+    out += line(xObj, objTipY, xDevice, objTipY, "#e44b42");
+    out += line(xDevice, objTipY, xImg, imgTipY, "#e44b42");
+    out += line(xObj, objTipY, xImg, imgTipY, "#2589df");
+  } else if (isMirror && device === "concaveMirror" && !c.virtual && pos !== "atF") {
+    out += line(xObj, objTipY, xDevice, objTipY, "#e44b42");
+    out += line(xDevice, objTipY, xImg, imgTipY, "#e44b42");
+    out += line(xObj, objTipY, xImg, imgTipY, "#2589df");
+  } else if (c.virtual) {
+    // Dotted backward extension helps show the apparent image location.
+    const rayY = axisY - c.objectH;
+    out += line(xObj, rayY, xDevice, rayY, "#e44b42");
+    out += line(xDevice, rayY, xDevice+75, axisY+15, "#e44b42");
+    out += line(xDevice, rayY, xDevice+75, axisY+15, "#e44b42", true);
+    out += line(xObj, rayY, xDevice+75, axisY+15, "#2589df");
+    out += line(xDevice, rayY, xImg, imgTipY, "#9349dc", true);
+  }
+
+  if (c.virtual && isMirror) {
+    out += text(xDevice+115, 80, "BEHIND MIRROR", "#9349dc", 13);
+  }
+
+  if (c.virtual && !isMirror) {
+    out += text(xDevice-100, 80, "SAME SIDE AS OBJECT", "#9349dc", 12);
+  }
+
+  out += text(350, 410,
+    "Schematic diagram — positions illustrate the IGCSE rules",
+    "#64748b", 12);
+
+  svg.innerHTML = out;
+
+  document.getElementById("imagePosition").textContent = c.imagePosition;
+  document.getElementById("imageType").textContent = c.type;
+  document.getElementById("orientation").textContent = c.orientation;
+  document.getElementById("size").textContent = c.size;
+
+  let note = c.note || (
+    c.virtual
+      ? "Virtual image: the rays spread out, so their backward extensions show where the image appears to be."
+      : "Real image: the rays meet at the image position. A screen can capture the image there."
+  );
+
+  let oldNote = document.getElementById("dynamicNote");
+  if (oldNote) oldNote.remove();
+
+  const box = document.createElement("div");
+  box.id = "dynamicNote";
+  box.className = "note";
+  box.style.marginTop = "12px";
+  box.textContent = note;
+  document.querySelector(".properties").after(box);
+}
+
+function updatePositions() {
+  const device = deviceSelect.value;
+  positionSelect.innerHTML = "";
+
+  for (const [value, label] of positions[device]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    positionSelect.appendChild(option);
+  }
+
+  draw();
+}
+
+deviceSelect.addEventListener("change", updatePositions);
+positionSelect.addEventListener("change", draw);
+
+updatePositions();
+</script>
+
+</body>
+</html>
